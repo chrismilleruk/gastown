@@ -63,26 +63,40 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) (retErr error) {
 
 	b := beads.New(workDir)
 
-	// Find agent's pinned bead (handoff bead)
+	// Find molecule to burn: try pinned handoff bead first, fall back to hooked beads.
 	role := extractRoleFromIdentity(target)
+
+	var moleculeID string
+	var handoffID string // only set when using pinned handoff bead path
 
 	handoff, err := b.FindHandoffBead(role)
 	if err != nil {
 		return fmt.Errorf("finding handoff bead: %w", err)
 	}
-	if handoff == nil {
-		return fmt.Errorf("no handoff bead found for %s (looked for %q with pinned status)", target, beads.HandoffBeadTitle(role))
-	}
 
-	// Check for attached molecule
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment == nil || attachment.AttachedMolecule == "" {
-		fmt.Printf("%s No molecule attached to %s - nothing to burn\n",
-			style.Dim.Render("ℹ"), target)
-		return nil
+	if handoff != nil {
+		// Legacy path: pinned handoff bead with attached molecule
+		attachment := beads.ParseAttachmentFields(handoff)
+		if attachment == nil || attachment.AttachedMolecule == "" {
+			fmt.Printf("%s No molecule attached to %s - nothing to burn\n",
+				style.Dim.Render("ℹ"), target)
+			return nil
+		}
+		moleculeID = attachment.AttachedMolecule
+		handoffID = handoff.ID
+	} else {
+		// Fallback: find hooked ephemeral bead (wisp) assigned to this agent (bd-bn5).
+		// gt patrol new creates wisps with status "hooked" without a pinned handoff bead.
+		moleculeID, err = findHookedMolecule(b, target)
+		if err != nil {
+			return err
+		}
+		if moleculeID == "" {
+			fmt.Printf("%s No molecule found for %s - nothing to burn\n",
+				style.Dim.Render("ℹ"), target)
+			return nil
+		}
 	}
-
-	moleculeID := attachment.AttachedMolecule
 
 	// Recursively close all descendant step issues before detaching
 	// This prevents orphaned step issues from accumulating (gt-psj76.1)
@@ -95,15 +109,18 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) (retErr error) {
 		telemetry.RecordMolBurn(ctx, moleculeID, childrenClosed, retErr)
 	}()
 
-	// Detach the molecule with audit logging (this "burns" it by removing the attachment)
-	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
-		Operation: "burn",
-		Agent:     target,
-		Reason:    "molecule burned by agent",
-	})
-	if err != nil {
-		return fmt.Errorf("detaching molecule: %w", err)
+	// Detach from pinned handoff bead if we used that path
+	if handoffID != "" {
+		_, err = b.DetachMoleculeWithAudit(handoffID, beads.DetachOptions{
+			Operation: "burn",
+			Agent:     target,
+			Reason:    "molecule burned by agent",
+		})
+		if err != nil {
+			return fmt.Errorf("detaching molecule: %w", err)
+		}
 	}
+
 	// Close the molecule root after detach so the audit sees original status.
 	// Without this, the wisp root stays in "hooked" status indefinitely,
 	// causing patrol molecule leaks (issue #1828).
@@ -117,7 +134,7 @@ func runMoleculeBurn(cmd *cobra.Command, args []string) (retErr error) {
 		result := map[string]interface{}{
 			"burned":          moleculeID,
 			"from":            target,
-			"handoff_id":      handoff.ID,
+			"handoff_id":      handoffID,
 			"children_closed": childrenClosed,
 			"root_closed":     rootClosed,
 		}
@@ -197,32 +214,45 @@ func runMoleculeSquash(cmd *cobra.Command, args []string) (retErr error) {
 
 	b := beads.New(workDir)
 
-	// Find agent's pinned bead (handoff bead)
+	// Find molecule to squash: try pinned handoff bead first, fall back to hooked beads.
 	role := extractRoleFromIdentity(target)
+
+	var moleculeID string
+	var handoffID string // only set when using pinned handoff bead path
 
 	handoff, err := b.FindHandoffBead(role)
 	if err != nil {
 		return fmt.Errorf("finding handoff bead: %w", err)
 	}
-	if handoff == nil {
-		return fmt.Errorf("no handoff bead found for %s (looked for %q with pinned status)", target, beads.HandoffBeadTitle(role))
-	}
 
-	// Check for attached molecule
-	attachment := beads.ParseAttachmentFields(handoff)
-	if attachment == nil || attachment.AttachedMolecule == "" {
-		fmt.Printf("%s No molecule attached to %s - nothing to squash\n",
-			style.Dim.Render("ℹ"), target)
-		return nil
+	if handoff != nil {
+		// Legacy path: pinned handoff bead with attached molecule
+		attachment := beads.ParseAttachmentFields(handoff)
+		if attachment == nil || attachment.AttachedMolecule == "" {
+			fmt.Printf("%s No molecule attached to %s - nothing to squash\n",
+				style.Dim.Render("ℹ"), target)
+			return nil
+		}
+		moleculeID = attachment.AttachedMolecule
+		handoffID = handoff.ID
+	} else {
+		// Fallback: find hooked ephemeral bead (wisp) assigned to this agent (bd-bn5).
+		// gt patrol new creates wisps with status "hooked" without a pinned handoff bead.
+		moleculeID, err = findHookedMolecule(b, target)
+		if err != nil {
+			return err
+		}
+		if moleculeID == "" {
+			fmt.Printf("%s No molecule found for %s - nothing to squash\n",
+				style.Dim.Render("ℹ"), target)
+			return nil
+		}
 	}
-
-	moleculeID := attachment.AttachedMolecule
 
 	var doneSteps, totalSteps int
 	defer func() {
 		telemetry.RecordMolSquash(cmd.Context(), moleculeID, doneSteps, totalSteps, !moleculeNoDigest, retErr)
 	}()
-
 	// Apply jitter before acquiring any Dolt locks.
 	// Multiple patrol agents (deacon, witness, refinery) squash concurrently at
 	// cycle end, causing exclusive-lock contention. A random pre-sleep
@@ -311,13 +341,15 @@ squashed_at: %s
 	if !moleculeNoDigest {
 		detachReason = "molecule squashed"
 	}
-	_, err = b.DetachMoleculeWithAudit(handoff.ID, beads.DetachOptions{
-		Operation: "squash",
-		Agent:     target,
-		Reason:    detachReason,
-	})
-	if err != nil {
-		return fmt.Errorf("detaching molecule: %w", err)
+	if handoffID != "" {
+		_, err = b.DetachMoleculeWithAudit(handoffID, beads.DetachOptions{
+			Operation: "squash",
+			Agent:     target,
+			Reason:    detachReason,
+		})
+		if err != nil {
+			return fmt.Errorf("detaching molecule: %w", err)
+		}
 	}
 
 	// Close the molecule root after detach so the audit sees original status.
@@ -333,7 +365,7 @@ squashed_at: %s
 		result := map[string]interface{}{
 			"squashed":        moleculeID,
 			"from":            target,
-			"handoff_id":      handoff.ID,
+			"handoff_id":      handoffID,
 			"children_closed": childrenClosed,
 			"digest_skipped":  moleculeNoDigest,
 			"root_closed":     rootClosed,
@@ -425,4 +457,28 @@ func closeDescendantsImpl(b *beads.Beads, parentID string, force bool) (int, err
 		return totalClosed, errors.Join(errs...)
 	}
 	return totalClosed, nil
+}
+
+// findHookedMolecule finds a hooked ephemeral bead (wisp molecule) assigned to the target agent.
+// This is the fallback path when no pinned handoff bead exists — gt patrol new creates
+// wisps with status "hooked" directly, without a pinned handoff bead intermediary.
+// Returns the molecule ID or empty string if none found.
+func findHookedMolecule(b *beads.Beads, target string) (string, error) {
+	hookedBeads, err := b.List(beads.ListOptions{
+		Status:   beads.StatusHooked,
+		Assignee: target,
+		Priority: -1,
+	})
+	if err != nil {
+		return "", fmt.Errorf("listing hooked beads: %w", err)
+	}
+
+	// Find the first ephemeral (wisp) bead — these are patrol molecules
+	for _, hb := range hookedBeads {
+		if hb.Ephemeral {
+			return hb.ID, nil
+		}
+	}
+
+	return "", nil
 }
