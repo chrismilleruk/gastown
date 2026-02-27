@@ -582,6 +582,54 @@ func splitFirstEquals(s string) []string {
 	return []string{s[:idx], s[idx+1:]}
 }
 
+func TestBuildRefineryPatrolVars_AgentBead(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create mayor/rigs.json with a rig that has a beads prefix
+	mayorDir := filepath.Join(tmpDir, "mayor")
+	if err := os.MkdirAll(mayorDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rigsJSON := `{"version":1,"rigs":{"myrig":{"git_url":"https://example.com","added_at":"2024-01-01T00:00:00Z","beads":{"repo":"","prefix":"mr"}}}}`
+	if err := os.WriteFile(filepath.Join(mayorDir, "rigs.json"), []byte(rigsJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "myrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	varMap := make(map[string]string)
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 {
+			varMap[parts[0]] = parts[1]
+		}
+	}
+	if got := varMap["agent_bead"]; got != "mr-myrig-refinery" {
+		t.Errorf("agent_bead = %q, want %q", got, "mr-myrig-refinery")
+	}
+}
+
+func TestBuildRefineryPatrolVars_AgentBeadNoRigsJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	// No rigs.json — agent_bead should not be injected
+	ctx := RoleContext{
+		TownRoot: tmpDir,
+		Rig:      "testrig",
+	}
+	vars := buildRefineryPatrolVars(ctx)
+
+	for _, v := range vars {
+		parts := splitFirstEquals(v)
+		if len(parts) == 2 && parts[0] == "agent_bead" {
+			t.Errorf("expected no agent_bead var when rigs.json missing, but got agent_bead=%q", parts[1])
+		}
+	}
+}
+
 // --- Patrol discovery tests (findActivePatrol) ---
 
 func requireBd(t *testing.T) {

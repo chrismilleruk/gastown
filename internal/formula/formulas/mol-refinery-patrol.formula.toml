@@ -182,6 +182,10 @@ default = "UNSET_RIG"
 description = "Beads prefix for this rig (e.g., gt for gastown, la for laser)"
 default = "gt"
 
+[vars.agent_bead]
+description = "Refinery agent bead ID for backoff tracking (e.g., sa-sailingnav-refinery). Injected by gt patrol new using the rig's beads prefix."
+default = ""
+
 [[steps]]
 id = "inbox-check"
 title = "Check refinery mail"
@@ -990,7 +994,7 @@ This must return exactly one bead ID. If it returns zero results, STOP and repor
 Then use await-event to subscribe to the refinery event channel with exponential backoff:
 
 ```bash
-gt mol step await-event --channel refinery --agent-bead YOUR_AGENT_BEAD \
+gt mol step await-event --channel refinery --agent-bead {{agent_bead}} \
   --backoff-base 30s --backoff-mult 2 --backoff-max 15m --cleanup
 ```
 

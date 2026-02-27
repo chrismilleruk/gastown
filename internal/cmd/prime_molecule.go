@@ -371,6 +371,17 @@ func buildRefineryPatrolVars(ctx RoleContext) []string {
 	}
 	rigPath := filepath.Join(ctx.TownRoot, ctx.Rig)
 
+	// Inject agent_bead using the rig's beads prefix from rigs.json.
+	// The formula uses {{agent_bead}} for the await-event --agent-bead flag.
+	// Without this, the formula defaults to "" and backoff tracking is disabled.
+	rigsConfigPath := filepath.Join(ctx.TownRoot, "mayor", "rigs.json")
+	if rigsConfig, rcErr := config.LoadRigsConfig(rigsConfigPath); rcErr == nil {
+		if entry, ok := rigsConfig.Rigs[ctx.Rig]; ok && entry.BeadsConfig != nil && entry.BeadsConfig.Prefix != "" {
+			agentBead := fmt.Sprintf("%s-%s-refinery", entry.BeadsConfig.Prefix, ctx.Rig)
+			vars = append(vars, fmt.Sprintf("agent_bead=%s", agentBead))
+		}
+	}
+
 	// Always inject target_branch from rig config — this is independent of
 	// merge queue settings and must not be gated behind MQ existence.
 	// Without this, rigs with no settings/config.json or no merge_queue
