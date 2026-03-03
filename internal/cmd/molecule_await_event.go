@@ -292,7 +292,6 @@ func calculateEventTimeout(idleCycles int) (time.Duration, error) {
 		if err != nil {
 			return 0, fmt.Errorf("invalid backoff-base: %w", err)
 		}
-
 		var maxDur time.Duration
 		if awaitEventBackoffMax != "" {
 			maxDur, err = time.ParseDuration(awaitEventBackoffMax)

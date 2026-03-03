@@ -87,6 +87,15 @@ func TestCalculateEventTimeout(t *testing.T) {
 			want:        10 * time.Minute,
 		},
 		{
+			name:        "high idle cycles do not overflow (regression: idle=30)",
+			timeout:     "60s",
+			backoffBase: "30s",
+			backoffMult: 2,
+			backoffMax:  "5m",
+			idleCycles:  30, // 30s * 2^30 overflows int64 without early-exit cap
+			want:        5 * time.Minute,
+		},
+		{
 			name:    "invalid timeout",
 			timeout: "invalid",
 			wantErr: true,
