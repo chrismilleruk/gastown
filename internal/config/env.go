@@ -212,12 +212,11 @@ func AgentEnv(cfg AgentEnvConfig) map[string]string {
 		env["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
 	}
 
-	// Clear CLAUDECODE to prevent nested session detection in Claude Code v2.x.
-	// When gt sling is invoked from within a Claude Code session, CLAUDECODE=1
-	// leaks through tmux's global environment into new polecat sessions, causing
-	// Claude Code to refuse to start with a "nested sessions" error.
+	// Note: CLAUDECODE is intentionally NOT set here. Setting it to empty string
+	// is not sufficient — Claude Code v2.x treats CLAUDECODE="" the same as
+	// CLAUDECODE=1 for nested-session detection. The variable is unset via the
+	// shell command prefix in PrependEnv ("unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT &&").
 	// See: https://github.com/steveyegge/gastown/issues/1666
-	env["CLAUDECODE"] = ""
 
 	// Propagate Claude Code's own OTEL telemetry when GT telemetry is enabled.
 	// Reuses the same VictoriaMetrics endpoint as gastown's telemetry so all

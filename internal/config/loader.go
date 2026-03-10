@@ -2326,17 +2326,24 @@ func SanitizeAgentEnv(resolvedEnv, callerEnv map[string]string) {
 	// to fail with "Nested sessions share runtime resources and will crash all active
 	// sessions." Clear it unless the caller explicitly provides it.
 	// See: https://github.com/steveyegge/gastown/issues/1666
-	if _, ok := callerEnv["CLAUDECODE"]; !ok {
-		resolvedEnv["CLAUDECODE"] = ""
-	}
+	// Do NOT add CLAUDECODE to resolvedEnv — it must be unset in the shell
+	// command, not merely set to empty. Claude Code v2.x treats CLAUDECODE=""
+	// the same as CLAUDECODE=1 for nested-session detection. The unset happens
+	// in PrependEnv which always prepends "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT &&".
 }
 
 // PrependEnv prepends export statements to a command string.
 // Values containing special characters are properly shell-quoted.
 // On Windows, uses PowerShell $env: syntax.
 func PrependEnv(command string, envVars map[string]string) string {
+	// Always unset Claude Code nesting-detection vars so agent subprocesses
+	// don't trigger "Cannot be launched inside another Claude Code session".
+	// Setting to empty (CLAUDECODE="") is NOT sufficient — v2.x treats any
+	// presence of the variable (even empty) as a nested session.
+	const unsetPrefix = "unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT && "
+
 	if len(envVars) == 0 {
-		return command
+		return unsetPrefix + command
 	}
 
 	var exports []string
@@ -2352,7 +2359,7 @@ func PrependEnv(command string, envVars map[string]string) string {
 	if runtime.GOOS == "windows" {
 		return strings.Join(exports, "; ") + "; " + command
 	}
-	return "export " + strings.Join(exports, " ") + " && " + command
+	return unsetPrefix + "export " + strings.Join(exports, " ") + " && " + command
 }
 
 // BuildStartupCommandWithAgentOverride builds a startup command like BuildStartupCommand,
