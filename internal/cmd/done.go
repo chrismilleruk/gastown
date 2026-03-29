@@ -236,6 +236,18 @@ func runDone(cmd *cobra.Command, args []string) (retErr error) {
 		}
 	}
 
+	// Capture HEAD SHA early for memory prompt (before any checkout/branch changes).
+	// Used at the end of gt done to give polecats tagged context for bd remember.
+	headSHA := ""
+	if cwdAvailable {
+		if raw, err := g.Rev("HEAD"); err == nil {
+			headSHA = strings.TrimSpace(raw)
+			if len(headSHA) > 8 {
+				headSHA = headSHA[:8]
+			}
+		}
+	}
+
 	// Auto-detect cleanup status if not explicitly provided
 	// This prevents premature polecat cleanup by ensuring witness knows git state
 	if doneCleanupStatus == "" {
@@ -1261,6 +1273,11 @@ notifyWitness:
 		}
 
 		fmt.Printf("%s Polecat transitioned to IDLE — ready for new work\n", style.Bold.Render("✓"))
+
+		// Prompt for session memories (hq-7s4).
+		// Polecats see this output before their session returns to IDLE.
+		// They can still run bd remember — the session stays alive.
+		printMemoryPrompt(issueID, branch, headSHA)
 	}
 
 	fmt.Println()
@@ -1316,6 +1333,41 @@ func pushSubmoduleChanges(g *git.Git, defaultBranch string) {
 		} else {
 			fmt.Printf("%s Submodule %s pushed\n", style.Bold.Render("✓"), sc.Path)
 		}
+	}
+}
+
+// printMemoryPrompt encourages polecats to write bd remember entries before
+// their session returns to IDLE. Provides tagged context (bead ID, branch, SHA)
+// so memories can be linked back to the work that produced them. (hq-7s4)
+func printMemoryPrompt(issueID, branch, sha string) {
+	fmt.Println()
+	fmt.Println(style.Bold.Render("Session reflection"))
+	fmt.Println()
+	fmt.Println("Consider writing memories that help future agents.")
+	fmt.Println("Run bd remember \"...\" before your session ends.")
+	fmt.Println()
+	fmt.Println("Tag your memories with:")
+	if issueID != "" {
+		fmt.Printf("  Bead:   %s\n", issueID)
+	}
+	if branch != "" {
+		fmt.Printf("  Branch: %s\n", branch)
+	}
+	if sha != "" {
+		fmt.Printf("  Commit: %s\n", sha)
+	}
+	fmt.Println()
+	fmt.Println("Good candidates:")
+	fmt.Println("  - Gotchas, API quirks, or workarounds you discovered")
+	fmt.Println("  - Non-obvious design decisions or tradeoffs")
+	fmt.Println("  - Dead ends that cost time (save others the same)")
+	fmt.Println("  - Cross-component dependencies or surprising interactions")
+	if issueID != "" {
+		contextTag := issueID
+		if sha != "" {
+			contextTag = issueID + " (" + sha + ")"
+		}
+		fmt.Printf("\nExample: bd remember \"%s: <insight here>\"\n", contextTag)
 	}
 }
 
